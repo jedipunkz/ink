@@ -25,27 +25,22 @@ test('catch and display error', t => {
 
 	render(<Test />, {stdout});
 
-	t.deepEqual(
-		stripAnsi((stdout.write as any).lastCall.args[0] as string)
-			.split('\n')
-			.slice(0, 14),
-		[
-			'',
-			'  ERROR  Oh no',
-			'',
-			' test/errors.tsx:23:9',
-			'',
-			' 20:   const stdout = createStdout();',
-			' 21:',
-			' 22:   const Test = () => {',
-			" 23:     throw new Error('Oh no');",
-			' 24:   };',
-			' 25:',
-			' 26:   render(<Test />, {stdout});',
-			'',
-			' - Test (test/errors.tsx:23:9)',
-		],
-	);
+	t.deepEqual(stripAnsi(stdout.get()).split('\n').slice(0, 14), [
+		'',
+		'  ERROR  Oh no',
+		'',
+		' test/errors.tsx:23:9',
+		'',
+		' 20:   const stdout = createStdout();',
+		' 21:',
+		' 22:   const Test = () => {',
+		" 23:     throw new Error('Oh no');",
+		' 24:   };',
+		' 25:',
+		' 26:   render(<Test />, {stdout});',
+		'',
+		' - Test (test/errors.tsx:23:9)',
+	]);
 });
 
 test('ErrorBoundary catches and displays nested component errors', t => {
