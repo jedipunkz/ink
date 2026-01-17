@@ -14,6 +14,7 @@ import StdinContext from './StdinContext.js';
 import StdoutContext from './StdoutContext.js';
 import StderrContext from './StderrContext.js';
 import FocusContext from './FocusContext.js';
+import CursorContext, {type CursorPosition} from './CursorContext.js';
 import ErrorBoundary from './ErrorBoundary.js';
 
 const tab = '\t';
@@ -29,6 +30,9 @@ type Props = {
 	readonly writeToStderr: (data: string) => void;
 	readonly exitOnCtrlC: boolean;
 	readonly onExit: (error?: Error) => void;
+	readonly onCursorPositionChange?: (
+		position: CursorPosition | undefined,
+	) => void;
 };
 
 type Focusable = {
@@ -48,6 +52,7 @@ function App({
 	writeToStderr,
 	exitOnCtrlC,
 	onExit,
+	onCursorPositionChange,
 }: Props): React.ReactNode {
 	const [isFocusEnabled, setIsFocusEnabled] = useState(true);
 	const [activeFocusId, setActiveFocusId] = useState<string | undefined>(
@@ -58,6 +63,10 @@ function App({
 	const [, setFocusables] = useState<Focusable[]>([]);
 	// Track focusables count for tab navigation check (avoids stale closure)
 	const focusablesCountRef = useRef(0);
+	// Cursor position for IME support
+	const [cursorPosition, setCursorPositionState] = useState<
+		CursorPosition | undefined
+	>(undefined);
 
 	// Count how many components enabled raw mode to avoid disabling
 	// raw mode until all components don't need it anymore
@@ -270,6 +279,14 @@ function App({
 		};
 	}, [isFocusEnabled, focusNext, focusPrevious]);
 
+	const handleSetCursorPosition = useCallback(
+		(position: CursorPosition | undefined): void => {
+			setCursorPositionState(position);
+			onCursorPositionChange?.(position);
+		},
+		[onCursorPositionChange],
+	);
+
 	const enableFocus = useCallback((): void => {
 		setIsFocusEnabled(true);
 	}, []);
@@ -460,13 +477,23 @@ function App({
 		],
 	);
 
+	const cursorContextValue = useMemo(
+		() => ({
+			setCursorPosition: handleSetCursorPosition,
+			cursorPosition,
+		}),
+		[handleSetCursorPosition, cursorPosition],
+	);
+
 	return (
 		<AppContext.Provider value={appContextValue}>
 			<StdinContext.Provider value={stdinContextValue}>
 				<StdoutContext.Provider value={stdoutContextValue}>
 					<StderrContext.Provider value={stderrContextValue}>
 						<FocusContext.Provider value={focusContextValue}>
-							<ErrorBoundary onError={handleExit}>{children}</ErrorBoundary>
+							<CursorContext.Provider value={cursorContextValue}>
+								<ErrorBoundary onError={handleExit}>{children}</ErrorBoundary>
+							</CursorContext.Provider>
 						</FocusContext.Provider>
 					</StderrContext.Provider>
 				</StdoutContext.Provider>
