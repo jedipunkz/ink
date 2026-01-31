@@ -64,6 +64,7 @@ function App({
 	// Track focusables count for tab navigation check (avoids stale closure)
 	const focusablesCountRef = useRef(0);
 	// Cursor position for IME support
+	// eslint-disable-next-line react/hook-use-state
 	const [cursorPosition, setCursorPositionState] = useState<
 		CursorPosition | undefined
 	>(undefined);
