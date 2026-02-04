@@ -65,6 +65,17 @@ test('single node - fit-content box with emojis', t => {
 	t.is(output, boxen('🌊🌊', {borderStyle: 'round'}));
 });
 
+// Issue #733: Emojis with variation selectors (FE0F) should align properly
+test('single node - fit-content box with variation selector emojis', t => {
+	const output = renderToString(
+		<Box borderStyle="round" alignSelf="flex-start">
+			<Text>🌡️⚠️✅</Text>
+		</Box>,
+	);
+
+	t.is(output, boxen('🌡️⚠️✅', {borderStyle: 'round'}));
+});
+
 test('single node - fixed width box', t => {
 	const output = renderToString(
 		<Box borderStyle="round" width={20}>
@@ -426,15 +437,12 @@ test('render border after update', t => {
 		debug: true,
 	});
 
-	t.is(
-		(stdout.write as any).lastCall.args[0],
-		boxen('Hello World', {width: 100, borderStyle: 'round'}),
-	);
+	t.is(stdout.get(), boxen('Hello World', {width: 100, borderStyle: 'round'}));
 
 	rerender(<Test borderColor="green" />);
 
 	t.is(
-		(stdout.write as any).lastCall.args[0],
+		stdout.get(),
 		boxen('Hello World', {
 			width: 100,
 			borderStyle: 'round',
@@ -445,7 +453,7 @@ test('render border after update', t => {
 	rerender(<Test />);
 
 	t.is(
-		(stdout.write as any).lastCall.args[0],
+		stdout.get(),
 		boxen('Hello World', {
 			width: 100,
 			borderStyle: 'round',
@@ -871,4 +879,32 @@ test('dim right border color', t => {
 			'Below',
 		].join('\n'),
 	);
+});
+
+// Regression test for https://github.com/vadimdemedes/ink/issues/840
+// borderDimColor should not dim styled child Text components touching the left edge
+test('borderDimColor does not dim styled child Text touching left edge', t => {
+	const output = renderToString(
+		<Box borderDimColor borderStyle="round" alignSelf="flex-start">
+			<Text bold color="blue">
+				styled text
+			</Text>
+		</Box>,
+	);
+
+	// The styled text should be bold and blue (not dimmed)
+	// Note: Text component applies color first then bold, so the escape code order is bold+blue
+	const styledText = chalk.bold(chalk.blue('styled text'));
+	t.true(
+		output.includes(styledText),
+		'Child text should retain its color and bold styling, not be dimmed',
+	);
+
+	// The border should be dimmed (entire top border line is dimmed as a unit)
+	const dimmedTopBorder = chalk.dim(
+		cliBoxes.round.topLeft +
+			cliBoxes.round.top.repeat(11) +
+			cliBoxes.round.topRight,
+	);
+	t.true(output.includes(dimmedTopBorder), 'Border should be dimmed');
 });

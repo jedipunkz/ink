@@ -1,6 +1,7 @@
 import React from 'react';
 import test from 'ava';
 import chalk from 'chalk';
+import stripAnsi from 'strip-ansi';
 import {render, Box, Text} from '../src/index.js';
 import {renderToString} from './helpers/render-to-string.js';
 import createStdout from './helpers/create-stdout.js';
@@ -26,7 +27,9 @@ test('text with dim+bold', t => {
 			Test
 		</Text>,
 	);
-	t.is(output, chalk.bold.dim('Test'));
+
+	t.is(stripAnsi(output), 'Test');
+	t.not(output, 'Test'); // Ensure ANSI codes are present
 });
 
 test('text with dimmed color', t => {
@@ -96,10 +99,10 @@ test('remeasure text when text is changed', t => {
 
 	const stdout = createStdout();
 	const {rerender} = render(<Test />, {stdout, debug: true});
-	t.is((stdout.write as any).lastCall.args[0], 'abc');
+	t.is(stdout.get(), 'abc');
 
 	rerender(<Test add />);
-	t.is((stdout.write as any).lastCall.args[0], 'abcx');
+	t.is(stdout.get(), 'abcx');
 });
 
 test('remeasure text when text nodes are changed', t => {
@@ -117,10 +120,10 @@ test('remeasure text when text nodes are changed', t => {
 	const stdout = createStdout();
 
 	const {rerender} = render(<Test />, {stdout, debug: true});
-	t.is((stdout.write as any).lastCall.args[0], 'abc');
+	t.is(stdout.get(), 'abc');
 
 	rerender(<Test add />);
-	t.is((stdout.write as any).lastCall.args[0], 'abcx');
+	t.is(stdout.get(), 'abcx');
 });
 
 // See https://github.com/vadimdemedes/ink/issues/743

@@ -10,6 +10,7 @@ import {LegacyRoot} from 'react-reconciler/constants.js';
 import {type FiberRoot} from 'react-reconciler';
 import Yoga from 'yoga-layout';
 import wrapAnsi from 'wrap-ansi';
+import terminalSize from 'terminal-size';
 import reconciler from './reconciler.js';
 import render from './renderer.js';
 import * as dom from './dom.js';
@@ -17,6 +18,7 @@ import logUpdate, {type LogUpdate} from './log-update.js';
 import instances from './instances.js';
 import App from './components/App.js';
 import {accessibilityContext as AccessibilityContext} from './components/AccessibilityContext.js';
+import {type CursorPosition} from './components/CursorContext.js';
 
 const noop = () => {};
 
@@ -122,7 +124,6 @@ export default class Ink {
 			() => {},
 			() => {},
 			() => {},
-			null,
 		);
 
 		// Unmount when process exits
@@ -153,8 +154,13 @@ export default class Ink {
 
 	getTerminalWidth = () => {
 		// The 'columns' property can be undefined or 0 when not using a TTY.
-		// In that case we fall back to 80.
-		return this.options.stdout.columns || 80;
+		// Use terminal-size as a fallback for piped processes, then default to 80.
+		if (this.options.stdout.columns) {
+			return this.options.stdout.columns;
+		}
+
+		const size = terminalSize();
+		return size?.columns ?? 80;
 	};
 
 	resized = () => {
@@ -209,13 +215,18 @@ export default class Ink {
 				this.fullStaticOutput += staticOutput;
 			}
 
-			this.options.stdout.write(this.fullStaticOutput + output);
+			// Use Synchronized Update Mode to fix IME issues
+			this.options.stdout.write(
+				'\u001B[?2026h' + this.fullStaticOutput + output + '\u001B[?2026l',
+			);
 			return;
 		}
 
 		if (isInCi) {
 			if (hasStaticOutput) {
-				this.options.stdout.write(staticOutput);
+				this.options.stdout.write(
+					'\u001B[?2026h' + staticOutput + '\u001B[?2026l',
+				);
 			}
 
 			this.lastOutput = output;
@@ -230,7 +241,9 @@ export default class Ink {
 					this.lastOutputHeight > 0
 						? ansiEscapes.eraseLines(this.lastOutputHeight)
 						: '';
-				this.options.stdout.write(erase + staticOutput);
+				this.options.stdout.write(
+					'\u001B[?2026h' + erase + staticOutput + '\u001B[?2026l',
+				);
 				// After erasing, the last output is gone, so we should reset its height
 				this.lastOutputHeight = 0;
 			}
@@ -239,7 +252,7 @@ export default class Ink {
 				return;
 			}
 
-			const terminalWidth = this.options.stdout.columns || 80;
+			const terminalWidth = this.getTerminalWidth();
 
 			const wrappedOutput = wrapAnsi(output, terminalWidth, {
 				trim: false,
@@ -247,15 +260,19 @@ export default class Ink {
 			});
 
 			// If we haven't erased yet, do it now.
+			let toWrite = '\u001B[?2026h';
 			if (hasStaticOutput) {
-				this.options.stdout.write(wrappedOutput);
+				toWrite += wrappedOutput;
 			} else {
 				const erase =
 					this.lastOutputHeight > 0
 						? ansiEscapes.eraseLines(this.lastOutputHeight)
 						: '';
-				this.options.stdout.write(erase + wrappedOutput);
+				toWrite += erase + wrappedOutput;
 			}
+
+			toWrite += '\u001B[?2026l';
+			this.options.stdout.write(toWrite);
 
 			this.lastOutput = output;
 			this.lastOutputHeight =
@@ -269,7 +286,11 @@ export default class Ink {
 
 		if (this.lastOutputHeight >= this.options.stdout.rows) {
 			this.options.stdout.write(
-				ansiEscapes.clearTerminal + this.fullStaticOutput + output,
+				'\u001B[?2026h' +
+					ansiEscapes.clearTerminal +
+					this.fullStaticOutput +
+					output +
+					'\u001B[?2026l',
 			);
 			this.lastOutput = output;
 			this.lastOutputHeight = outputHeight;
@@ -280,7 +301,9 @@ export default class Ink {
 		// To ensure static output is cleanly rendered before main output, clear main output first
 		if (hasStaticOutput) {
 			this.log.clear();
-			this.options.stdout.write(staticOutput);
+			this.options.stdout.write(
+				'\u001B[?2026h' + staticOutput + '\u001B[?2026l',
+			);
 			this.log(output);
 		}
 
@@ -290,6 +313,18 @@ export default class Ink {
 
 		this.lastOutput = output;
 		this.lastOutputHeight = outputHeight;
+	};
+
+	// Handle cursor position change from App component
+	handleCursorPositionChange = (position: CursorPosition | undefined): void => {
+		// Set cursor position in log-update for IME support
+		this.log.setCursorPosition(position);
+
+		// Apply cursor position immediately so IME sees correct position
+		// without waiting for next render
+		if (!this.options.debug && !isInCi) {
+			this.log.applyCursorPositionNow();
+		}
 	};
 
 	render(node: ReactNode): void {
@@ -305,17 +340,15 @@ export default class Ink {
 					writeToStderr={this.writeToStderr}
 					exitOnCtrlC={this.options.exitOnCtrlC}
 					onExit={this.unmount}
+					onCursorPositionChange={this.handleCursorPositionChange}
 				>
 					{node}
 				</App>
 			</AccessibilityContext.Provider>
 		);
 
-		// @ts-expect-error the types for `react-reconciler` are not up to date with the library.
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-call
 		reconciler.updateContainerSync(tree, this.container, null, noop);
-		// @ts-expect-error the types for `react-reconciler` are not up to date with the library.
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-call
+
 		reconciler.flushSyncWork();
 	}
 
@@ -325,17 +358,23 @@ export default class Ink {
 		}
 
 		if (this.options.debug) {
-			this.options.stdout.write(data + this.fullStaticOutput + this.lastOutput);
+			this.options.stdout.write(
+				'\u001B[?2026h' +
+					data +
+					this.fullStaticOutput +
+					this.lastOutput +
+					'\u001B[?2026l',
+			);
 			return;
 		}
 
 		if (isInCi) {
-			this.options.stdout.write(data);
+			this.options.stdout.write('\u001B[?2026h' + data + '\u001B[?2026l');
 			return;
 		}
 
 		this.log.clear();
-		this.options.stdout.write(data);
+		this.options.stdout.write('\u001B[?2026h' + data + '\u001B[?2026l');
 		this.log(this.lastOutput);
 	}
 
@@ -345,18 +384,23 @@ export default class Ink {
 		}
 
 		if (this.options.debug) {
-			this.options.stderr.write(data);
-			this.options.stdout.write(this.fullStaticOutput + this.lastOutput);
+			this.options.stderr.write('\u001B[?2026h' + data + '\u001B[?2026l');
+			this.options.stdout.write(
+				'\u001B[?2026h' +
+					this.fullStaticOutput +
+					this.lastOutput +
+					'\u001B[?2026l',
+			);
 			return;
 		}
 
 		if (isInCi) {
-			this.options.stderr.write(data);
+			this.options.stderr.write('\u001B[?2026h' + data + '\u001B[?2026l');
 			return;
 		}
 
 		this.log.clear();
-		this.options.stderr.write(data);
+		this.options.stderr.write('\u001B[?2026h' + data + '\u001B[?2026l');
 		this.log(this.lastOutput);
 	}
 
@@ -388,11 +432,8 @@ export default class Ink {
 
 		this.isUnmounted = true;
 
-		// @ts-expect-error the types for `react-reconciler` are not up to date with the library.
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-call
 		reconciler.updateContainerSync(null, this.container, null, noop);
-		// @ts-expect-error the types for `react-reconciler` are not up to date with the library.
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-call
+
 		reconciler.flushSyncWork();
 		instances.delete(this.options.stdout);
 
